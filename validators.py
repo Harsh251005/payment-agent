@@ -180,3 +180,48 @@ def validate_expiry(expiry_month: int, expiry_year: int) -> tuple[int, int]:
         raise ValidationError("Card has expired.")
 
     return expiry_month, expiry_year
+
+
+def verify_identity(
+    user_name: str | None,
+    user_dob: str | None,
+    user_aadhaar_last4: str | None,
+    user_pincode: str | None,
+    account_name: str,
+    account_dob: str,
+    account_aadhaar_last4: str,
+    account_pincode: str,
+) -> bool:
+    """
+    Verify the user's identity using the assignment's strict rules.
+
+    Requirements:
+    - Full name must match exactly.
+    - At least one secondary factor must also match:
+      DOB OR Aadhaar last 4 OR pincode.
+    """
+
+    if user_name is None:
+        return False
+
+    # Name comparison is intentionally strict and case-sensitive.
+    name_matches = user_name == account_name
+
+    if not name_matches:
+        return False
+
+    secondary_match = (
+        (user_dob is not None and user_dob == account_dob)
+        or
+        (
+            user_aadhaar_last4 is not None
+            and user_aadhaar_last4 == account_aadhaar_last4
+        )
+        or
+        (
+            user_pincode is not None
+            and user_pincode == account_pincode
+        )
+    )
+
+    return secondary_match

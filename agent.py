@@ -2,7 +2,11 @@ from models import CardData
 from parser import InputParser
 from state import ConversationState
 from tools import PaymentAPI, PaymentAPIError
-from validators import ValidationError, normalize_account_id
+from validators import (
+    ValidationError,
+    normalize_account_id,
+    verify_identity,
+)
 
 
 class Agent:
@@ -113,19 +117,21 @@ class Agent:
             )
 
     def _handle_current_stage(self) -> dict:
-        """
-        Decide what to do based on the current conversation stage.
-        """
 
-        if self.state.stage == self.state.stage.START:
-            self.state.stage = self.state.stage.ACCOUNT_LOOKUP
+        from models import AgentStage
 
-        if self.state.stage == self.state.stage.ACCOUNT_LOOKUP:
+        if self.state.stage == AgentStage.START:
+            self.state.stage = AgentStage.ACCOUNT_LOOKUP
+
+        if self.state.stage == AgentStage.ACCOUNT_LOOKUP:
             return self._handle_account_lookup()
 
-        if self.state.stage == self.state.stage.VERIFICATION:
+        if self.state.stage == AgentStage.VERIFICATION:
+            return self._handle_verification()
+
+        if self.state.stage == AgentStage.BALANCE_DISCLOSURE:
             return {
-                "message": "Thanks. Please confirm your full name."
+                "message": "How much would you like to pay?"
             }
 
         return {
@@ -205,3 +211,107 @@ class Agent:
             pincode=data["pincode"],
             balance=Decimal(str(data["balance"])),
         )
+
+    def _handle_verification(self) -> dict:
+        """
+        Verify the user's identity against the account data.
+        """
+
+        if self.state.account is None:
+            return {
+                "message": (
+                    "I need to look up your account before "
+                    "I can verify your identity."
+                )
+            }
+
+        identity = self.state.identity
+        account = self.state.account
+
+        # We need the user's full name first.
+        if identity.full_name is None:
+            return {
+                "message": (
+                    "Please provide your full name."
+                )
+            }
+
+        # We need at least one secondary verification factor.
+        has_secondary_factor = any(
+            value is not None
+            for value in (
+                identity.dob,
+                identity.aadhaar_last4,
+                identity.pincode,
+            )
+        )
+
+        if not has_secondary_factor:
+            return {
+                "message": (
+                    "Thanks. Please provide your date of birth, "
+                    "Aadhaar last 4 digits, or pincode."
+                )
+            }
+
+        try:
+            verified = verify_identity(
+                user_name=identity.full_name,
+                user_dob=identity.dob,
+                user_aadhaar_last4=identity.aadhaar_last4,
+                user_pincode=identity.pincode,
+                account_name=account.full_name,
+                account_dob=account.dob,
+                account_aadhaar_last4=account.aadhaar_last4,
+                account_pincode=account.pincode,
+            )
+        except Exception:
+            return {
+                "message": (
+                    "I couldn't complete identity verification. "
+                    "Please try again."
+                )
+            }
+
+        if verified:
+            self.state.verified = True
+
+            from models import AgentStage
+
+            self.state.stage = AgentStage.BALANCE_DISCLOSURE
+
+            return {
+                "message": (
+                    f"Identity verified. Your outstanding balance is "
+                    f"₹{account.balance:.2f}."
+                )
+            }
+
+        self.state.verification_attempts += 1
+
+        remaining_attempts = 3 - self.state.verification_attempts
+
+        if self.state.verification_attempts >= 3:
+            from models import AgentStage
+
+            self.state.stage = AgentStage.TERMINATED
+
+            return {
+                "message": (
+                    "I'm sorry, but I couldn't verify your identity "
+                    "after multiple attempts. For your security, "
+                    "we can't continue with the payment."
+                )
+            }
+
+        return {
+            "message": (
+                    "I couldn't verify those details. "
+                    "Please check your information and try again."
+                    + (
+                        f" You have {remaining_attempts} attempt(s) remaining."
+                        if remaining_attempts > 0
+                        else ""
+                    )
+            )
+        }
