@@ -27,7 +27,7 @@ class ConversationState:
         default_factory=UserIdentityData
     )
 
-    verification_attempts: int = 0
+    verification_reattempts: int = 0
     verified: bool = False
 
     payment: PaymentData = field(
