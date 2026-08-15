@@ -2,7 +2,7 @@ from typing import Optional
 
 from openai import OpenAI
 from pydantic import BaseModel, Field
-
+from prompts import get_extraction_prompt
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -15,59 +15,64 @@ class ExtractionResult(BaseModel):
 
     account_id: Optional[str] = Field(
         default=None,
-        description="Account ID mentioned by the user, such as ACC1001."
+        description="The alphanumeric account ID (e.g., 'ACC1001'). Extract even if embedded in conversational text."
     )
 
     full_name: Optional[str] = Field(
         default=None,
-        description="The user's full name exactly as stated."
+        description=(
+            "The user's full name. Extract any general mention of the user's name here."
+        )
     )
 
     dob: Optional[str] = Field(
         default=None,
-        description="Date of birth normalized to YYYY-MM-DD when unambiguous."
+        description="Date of birth. You MUST convert any provided date format into strictly YYYY-MM-DD (e.g., 'May 14 1990' becomes '1990-05-14')."
     )
 
     aadhaar_last4: Optional[str] = Field(
         default=None,
-        description="Last four digits of Aadhaar."
+        description="Strictly the last four digits of the user's Aadhaar number. Strip any spaces or text."
     )
 
     pincode: Optional[str] = Field(
         default=None,
-        description="User's six-digit pincode."
+        description="The six-digit postal pincode. Strip any spaces (e.g., '4 0 0 0 0 1' becomes '400001')."
     )
 
     amount: Optional[str] = Field(
         default=None,
-        description="Payment amount as a decimal string, for example '500.00'."
+        description="The intended payment amount converted to a standard decimal string (e.g., 'a thousand rupees' becomes '1000.00', '500' becomes '500.00')."
     )
 
     cardholder_name: Optional[str] = Field(
         default=None,
-        description="Cardholder name exactly as stated by the user."
+        description=(
+            "The name printed on the credit card. ONLY extract a name here if the user "
+            "explicitly specifies it is for the card (e.g., 'the name on the card is Nithin'). "
+            "Otherwise, put names in 'full_name'."
+        )
     )
 
     card_number: Optional[str] = Field(
         default=None,
-        description="Full card number as digits only."
+        description="The full credit card number. You MUST extract this as a single string of digits only, stripping all spaces and dashes."
     )
 
     cvv: Optional[str] = Field(
         default=None,
-        description="Card CVV as digits only."
+        description="The 3 or 4-digit CVV security code as digits only. Convert spoken words like 'one two three' to '123'."
     )
 
     expiry_month: Optional[int] = Field(
         default=None,
-        description="Card expiry month as an integer from 1 to 12."
+        description="Card expiry month converted to an integer from 1 to 12. For example, '12/27' is 12. 'December' is 12."
     )
 
     expiry_year: Optional[int] = Field(
         default=None,
-        description="Card expiry year as a four-digit year."
+        description="Card expiry year converted to a four-digit integer. For example, '12/27' MUST be converted to 2027."
     )
-
 
 class InputParser:
     """
@@ -80,12 +85,12 @@ class InputParser:
     def __init__(
         self,
         client: OpenAI | None = None,
-        model: str = "gpt-5-mini",
+        model: str = "gpt-5.4-nano",
     ):
         self.client = client or OpenAI()
         self.model = model
 
-    def extract(self, user_input: str) -> ExtractionResult:
+    def extract(self, user_input: str, current_stage: str, balance_context, safe_state_json) -> ExtractionResult:
         """
         Extract structured fields from one user message.
         """
@@ -95,27 +100,7 @@ class InputParser:
             input=[
                 {
                     "role": "system",
-                    "content": (
-                        "You extract structured information from a user's "
-                        "payment-collection message.\n\n"
-
-                        "Rules:\n"
-                        "1. Extract only information explicitly stated or "
-                        "clearly implied by the user.\n"
-                        "2. Leave fields as null when the information is "
-                        "missing or ambiguous.\n"
-                        "3. A single message may contain multiple fields.\n"
-                        "4. Preserve names exactly as stated by the user.\n"
-                        "5. Normalize dates to YYYY-MM-DD when unambiguous.\n"
-                        "6. Normalize card numbers and CVV to digits only.\n"
-                        "7. Normalize spoken numbers such as 'one two three' "
-                        "to '123'.\n"
-                        "8. Convert payment amounts such as 'a thousand "
-                        "rupees' to a decimal string such as '1000.00'.\n"
-                        "9. Convert expiry expressions such as 'December "
-                        "2027' or '12/27' into expiry_month and expiry_year.\n"
-                        "10. Do not invent, guess, or infer missing values."
-                    ),
+                    "content": get_extraction_prompt(current_stage, balance_context, safe_state_json),
                 },
                 {
                     "role": "user",
