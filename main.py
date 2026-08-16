@@ -29,15 +29,11 @@ def main():
                 print("\n[System] Terminating session. Goodbye!")
                 break
 
-            # Skip empty inputs gracefully
-            if not user_input:
-                continue
-
             # Process the input through your state machine and LLM
             response = agent.next(user_input)
 
             # Display the generated response
-            print(f"Agent: {response.get('message', 'Error: No message returned.')}")
+            print(f"Agent: {response}")
 
         except KeyboardInterrupt:
             # Handles the user pressing Ctrl+C cleanly without throwing an ugly traceback

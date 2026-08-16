@@ -3,9 +3,7 @@ from typing import Optional
 from openai import OpenAI
 from pydantic import BaseModel, Field
 from prompts import get_extraction_prompt
-from dotenv import load_dotenv
-
-load_dotenv()
+from settings import settings
 
 
 class ExtractionResult(BaseModel):
@@ -21,7 +19,10 @@ class ExtractionResult(BaseModel):
     full_name: Optional[str] = Field(
         default=None,
         description=(
-            "The user's full name. Extract any general mention of the user's name here."
+            "The user's full name. Extract any general mention of the user's name here. "
+            "CRITICAL: You MUST extract the name EXACTLY as typed by the user, preserving their exact casing and spelling. "
+            "Do NOT auto-capitalize, title-case, or format the text in any way. "
+            "For example, if the user types 'nithin jain', you must extract exactly 'nithin jain', NOT 'Nithin Jain'."
         )
     )
 
@@ -85,7 +86,7 @@ class InputParser:
     def __init__(
         self,
         client: OpenAI | None = None,
-        model: str = "gpt-5.4-nano",
+        model: str = settings.EXTRACTION_MODEL,
     ):
         self.client = client or OpenAI()
         self.model = model

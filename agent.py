@@ -1,4 +1,3 @@
-import os
 from dataclasses import dataclass
 from enum import Enum, auto
 import json
@@ -11,6 +10,7 @@ from models import CardData, AgentStage
 from parser import InputParser
 from state import ConversationState
 from tools import PaymentAPI, PaymentAPIError
+from settings import settings
 from prompts import get_generation_prompt
 from validators import (
     ValidationError,
@@ -49,8 +49,12 @@ class Agent:
         self.parser = parser or InputParser()
         self.api = api or PaymentAPI()
 
-        # Initialize LLM for dynamic natural language generation
-        self.llm = llm_client or OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        # LLM is optional — agent must be fully functional without it.
+        if llm_client is not None:
+            self.llm = llm_client
+        else:
+            api_key = settings.OPENAI_API_KEY
+            self.llm = OpenAI(api_key=api_key) if api_key else None
 
         self._turn_errors: set[str] = set()
         self._turn_flags: set[str] = set()
@@ -87,7 +91,7 @@ class Agent:
             user_input,
             current_stage=self.state.stage.name,
             balance_context=balance_context,
-            safe_state_json=safe_state_json  # <-- THE MISSING LINK
+            safe_state_json=safe_state_json
         )
 
         # 2. Deterministic Validation & State Merge
@@ -103,7 +107,9 @@ class Agent:
                     "message": self._build_response(result.reason)
                 }
 
-        raise RuntimeError("Agent exceeded the maximum number of workflow transitions.")
+        return {
+            "message": "Agent exceeded the maximum number of workflow transitions."
+        }
 
     # ------------------------------------------------------------------
     # Extraction -> State (Unchanged - Great out-of-order handling)
@@ -287,20 +293,14 @@ class Agent:
             return self._respond("need_secondary_factor")
 
         try:
-            verified = verify_identity(
-                user_name=identity.full_name,
-                user_dob=identity.dob,
-                user_aadhaar_last4=identity.aadhaar_last4,
-                user_pincode=identity.pincode,
-                account_name=account.full_name,
-                account_dob=account.dob,
-                account_aadhaar_last4=account.aadhaar_last4,
-                account_pincode=account.pincode,
+            is_verified, failure_reason = verify_identity(
+                identity,
+                account
             )
         except Exception:
             return self._respond("verification_error")
 
-        if verified:
+        if is_verified:
             self.state.verified = True
             self.state.stage = AgentStage.BALANCE_DISCLOSURE
             self._turn_flags.add("verified")
@@ -310,6 +310,9 @@ class Agent:
         if self.state.verification_reattempts >= 3:
             self.state.stage = AgentStage.TERMINATED
             return self._respond("verification_terminated")
+
+        if failure_reason == "name_mismatch":
+            return self._respond("verification_name_mismatch")
 
         return self._respond("verification_failed")
 
@@ -436,6 +439,9 @@ class Agent:
 
         reason_hints = {
             "need_secondary_factor": "Explicitly ask the user to provide either their Date of Birth, PIN code, or the last 4 digits of their Aadhaar.",
+            "verification_name_mismatch": "Inform the user that the name provided does not match the account records, and ask them to confirm their full registered name.",
+            "verification_failed": "Inform the user that the verification details did not match our records, and ask them to verify their Date of Birth, PIN code, or last 4 digits of Aadhaar.",
+            "verification_lockout": "Inform the user that verification attempts have been exhausted and the session is terminated.",
             "missing_card_fields": "Look at the 'missing_card_fields' in the JSON state and explicitly list exactly WHICH card fields they still need to provide.",
             "need_card_details": "Explicitly ask the user for their Card Number, CVV, Expiry Date, and Cardholder Name.",
             "invalid_identity_input": "Look at the Validation Errors and explicitly state which identity input was incorrect, then ask them to try again.",
@@ -462,33 +468,65 @@ class Agent:
 
         try:
             response = self.llm.chat.completions.create(
-                model="gpt-5.4-mini",
+                model=settings.GENERATION_MODEL,
                 messages=messages,
-                temperature=0.2,
-                max_completion_tokens=200,
+                temperature=0,
+                max_completion_tokens=150,
                 stream=False
             )
 
             # Safely handle the possibility of content being None
             content = response.choices[0].message.content
-            return content.strip() if content else "I need some more information to proceed."
+            return content.strip() if content else self._fallback_response(reason)
 
         except Exception as ex:
             # 3. Production-Ready Deterministic Fallback
             # If the LLM goes down or times out, the agent gracefully degrades
             # to a safe, generic deterministic response instead of crashing.
-            print(f"EXCEPTION: {ex}")
-            fallback_map = {
-                "need_account_id": "[D]Please provide your account ID to get started.",
-                "invalid_account_id": "[D]That account ID is invalid. Please try again.",
-                "need_full_name": "[D]Please provide your full name for verification.",
-                "need_secondary_factor": "[D]Please provide your date of birth, pincode, or the last 4 digits of your Aadhaar.",
-                "verification_failed": f"[D]Verification failed. Please try again.",
-                "need_payment_amount": f"[D]How much would you like to pay?",
-                "need_card_details": "[D]Please provide your card number, CVV, expiry date, and cardholder name.",
-                "payment_success": f"[D]Payment successful! Thank you. Transaction ID: {self.state.transaction_id}",
-            }
-            return fallback_map.get(reason, "I need some more information to proceed. Please follow the prompt.")
+            print(f"[LLM generation failed, using fallback] {type(ex).__name__}: {ex}\n")
+            return self._fallback_response(reason)
+
+    def _fallback_response(self, reason: str) -> str:
+        fallback_map = {
+            "need_account_id": "Please provide your account ID to get started.",
+            "invalid_account_id": "That account ID doesn't look valid. Please check and try again.",
+            "account_not_found": "We couldn't find an account with that ID. Please double-check and try again.",
+            "account_service_unavailable": "Our account lookup service is temporarily unavailable. Please try again shortly.",
+            "verification_without_account": "Something went wrong — no account is on file yet. Please provide your account ID.",
+            "need_full_name": "Please provide your full name for verification.",
+            "need_secondary_factor": "Please provide your date of birth, pincode, or the last 4 digits of your Aadhaar.",
+            "invalid_identity_input": "Some of the identity details you provided look invalid. Please try again.",
+            "verification_error": "We ran into an issue verifying your identity. Please try again.",
+            "verification_failed": f"We couldn't verify your identity with those details. You have {3 - self.state.verification_reattempts} attempt(s) left.",
+            "verification_terminated": "Identity verification failed too many times. This session has been ended for security reasons.",
+            "unverified_state": "Something went wrong — your identity isn't verified. This session has been ended.",
+            "need_payment_amount": "How much would you like to pay?",
+            "invalid_amount": "That amount doesn't look valid. Please enter a valid payment amount.",
+            "missing_account_for_payment": "Something went wrong — no account is on file for this payment. This session has been ended.",
+            "amount_exceeds_balance": (
+                f"That amount exceeds your outstanding balance of ₹{self.state.account.balance:.2f}. Please enter a smaller amount."
+                if self.state.account else
+                "That amount exceeds your outstanding balance. Please enter a smaller amount."
+            ),
+            "need_card_details": "Please provide your card number, CVV, expiry date, and cardholder name.",
+            "invalid_card_details": "Some of the card details you provided look invalid. Please try again.",
+            "missing_card_fields": "Some card details are still missing. Please provide the remaining fields (card number, CVV, expiry date, and cardholder name).",
+            "payment_without_verification": "Something went wrong — payment can't proceed without verification. This session has been ended.",
+            "payment_without_account": "Something went wrong — no account is on file for this payment. This session has been ended.",
+            "payment_invalid_expiry": "The card expiry date appears invalid. Please provide it again.",
+            "payment_insufficient_balance": "The payment couldn't go through due to insufficient balance. Please enter a smaller amount.",
+            "payment_invalid_card": "That card number was declined as invalid. Please provide your card number again.",
+            "payment_invalid_cvv": "That CVV was declined as invalid. Please provide your CVV again.",
+            "payment_invalid_amount": "That payment amount was declined as invalid. Please enter the amount again.",
+            "payment_service_failure": "We couldn't process your payment due to a service issue. Please try again later.",
+            "payment_failed": "Your payment could not be completed. Please try again later.",
+            "payment_success": f"Payment successful! Thank you. Transaction ID: {self.state.transaction_id}",
+            "already_complete": "This transaction is already complete. Thank you!",
+            "terminated": "This session has ended. Please start a new conversation to make a payment.",
+            "unknown_state": "Something unexpected happened. Please start a new conversation.",
+        }
+        return fallback_map.get(reason, "I need some more information to proceed. Please follow the prompt.")
+
 
     # ------------------------------------------------------------------
     # Internal helpers
