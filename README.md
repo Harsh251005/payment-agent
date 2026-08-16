@@ -172,7 +172,7 @@ venv\Scripts\activate
 ### 3. Install Dependencies
 
 ```bash
-pip install -r requirements.txt
+uv pip install -r requirements.txt
 ```
 
 ### 4. Configure the OpenAI API Key
@@ -196,7 +196,7 @@ $env:OPENAI_API_KEY="your_actual_api_key_here"
 Run the agent interactively and test conversations manually:
 
 ```bash
-python main.py
+uv run main.py
 ```
 
 ### Automated Evaluation
@@ -221,285 +221,140 @@ The evaluation suite covers scenarios such as:
 
 ## Sample Conversations
 
+The agent is designed to handle natural, multi-turn conversations, including out-of-order inputs, verification failures, invalid payment data, and incremental data collection.
+
 ### 1. Successful End-to-End Payment
 
-**Scenario:** Happy path with multiple entities provided out of order and a coreference reference.
-
-**User:**
-
-```text
-Hi, I need to make a payment for my account.
-```
-
-**Agent:**
-
-```text
-Hi, I can help with that. Please share your account ID so I can look up your account and continue with the payment.
-```
-
-**User:**
-
-```text
-It's ACC1001. My name is Nithin Jain, and my pincode is 400001. I want to pay 500.
-```
-
-**Agent:**
-
-```text
-Thanks, Nithin — I’ve noted the amount of ₹500. To proceed with the card payment, please provide the missing card details: card number, CVV, and expiry date.
-```
-
-**User:**
-
-```text
-Card is 4532 0151 1283 0366, CVV is 123, expires 12/27. Name is the same as my account name.
-```
-
-**Agent:**
-
-```text
-Thanks — I’ve received your payment details and the payment has been successfully processed. Your transaction ID is txn_1786817872463_dae5orx, and your account is now up to date.
-```
-
-### 2. Verification Failure and Terminal Lockout
-
-**Scenario:** The user exhausts the allowed verification attempts.
-
-**User:**
-
-```text
-ACC1002
-```
-
-**Agent:**
-
-```text
-Thanks — I have your account reference. To continue verification, please provide your full name.
-```
-
-**User:**
-
-```text
-My name is Rajarajeswari Balasubramaniam
-```
-
-**Agent:**
-
-```text
-Thanks, Rajarajeswari Balasubramaniam. To continue verification, please provide either your Date of Birth, your PIN code, or the last 4 digits of your Aadhaar.
-```
-
-**User:**
-
-```text
-My pincode is 400001
-```
-
-**Agent:**
-
-```text
-Thanks for sharing your pincode. I’m unable to verify your identity with the details provided, so we’ll need to stop this verification attempt for now. Please try again with the required verification details when you’re ready.
-```
-
-**User:**
-
-```text
-Wait, DOB is 1985-11-22
-```
-
-**Agent:**
-
-```text
-Thanks — I’ve noted that you’ve confirmed your date of birth. Unfortunately, I still can’t verify your identity right now, so we’ll need to stop this verification attempt here.
-```
-
-**User:**
-
-```text
-Okay, let me try my Aadhaar, it ends in [Aadhaar Redacted]
-```
-
-**Agent:**
-
-```text
-I understand you’d like to try your Aadhaar, but I can’t continue verification here because the verification process has been terminated. Please contact support or restart the verification flow to continue.
-```
-
-**User:**
-
-```text
-Please let me try one more time, pincode is 400002!
-```
-
-**Agent:**
-
-```text
-I’m sorry, but I can’t continue this verification or payment flow any further. Please contact the support team or use the official payment portal to proceed.
-```
-
-### 3. Payment Failure Recovery
-
-**Scenario:** The user provides an amount above the outstanding balance and then supplies an invalid card number.
-
-**User:**
-
-```text
-Hello, ACC1001, Nithin Jain, DOB 1990-05-14
-```
-
-**Agent:**
-
-```text
-Thanks, Nithin — I’ve got your verified details. Please tell me the payment amount you’d like to pay, and I’ll take it from there.
-```
-
-**User:**
-
-```text
-I want to pay 2000
-```
-
-**Agent:**
-
-```text
-The amount you want to pay, ₹2000, exceeds your outstanding balance of ₹1250.75. Please enter an amount up to ₹1250.75 to continue.
-```
-
-**User:**
-
-```text
-Oops, make it 1000.
-```
-
-**Agent:**
-
-```text
-Got it — I’ve updated the amount to ₹1000. Please provide the remaining card details: card number, CVV, and expiry date.
-```
-
-**User:**
-
-```text
-Card is 4000 0000 0000 0000, expiry 12/27, CVV 123, cardholder Nithin Jain
-```
-
-**Agent:**
-
-```text
-Thanks, Nithin — I’ve received the expiry, CVV, and cardholder name, but the card number appears invalid. Please re-enter the full card number carefully so I can continue.
-```
-
-**User:**
-
-```text
-Ah, sorry, the card is 4532015112830366
-```
-
-**Agent:**
-
-```text
-Thanks — your payment of ₹1000 has been received successfully, and the transaction is complete. Your transaction ID is txn_1786817903126_7g8kmmc; if you’d like, I can now help with the next step for your account.
-```
-
-### 4. Name Collision and Drip-Feed
-
-**Scenario:** Payment details are provided one field at a time, and an explicitly supplied cardholder name overrides any inferred value.
-
-**User:**
-
-```text
-ACC1002
-```
-
-**Agent:**
-
-```text
-Thanks — I have your account reference. To continue, please share your full name exactly as it appears on the account.
-```
-
-**User:**
-
-```text
-Rajarajeswari Balasubramaniam
-```
-
-**Agent:**
-
-```text
-Thanks, Rajarajeswari Balasubramaniam. To continue verification, please provide either your Date of Birth, your PIN code, or the last 4 digits of your Aadhaar.
-```
-
-**User:**
-
-```text
-pincode is 400002
-```
-
-**Agent:**
-
-```text
-Thanks, I’ve noted your pincode. Your balance due is ₹540.00, so please tell me the payment amount you’d like to pay next.
-```
-
-**User:**
-
-```text
-pay 100
-```
-
-**Agent:**
-
-```text
-Thanks — I can take the ₹100 payment, but I still need your card number, CVV, and expiry date to continue.
-```
-
-**User:**
-
-```text
-cvv is 123
-```
-
-**Agent:**
-
-```text
-Thanks — I’ve got the CVV. I still need the card number and expiry date to continue with the payment.
-```
-
-**User:**
-
-```text
-expiry is 12/27
-```
-
-**Agent:**
-
-```text
-Thanks — I’ve noted the expiry date as 12/27. I still need your card number to continue with the payment.
-```
-
-**User:**
-
-```text
-card number is 4532015112830366
-```
-
-**Agent:**
-
-```text
-Thanks — I have the card number. Please provide the remaining card field: cardholder name.
-```
-
-**User:**
-
-```text
-The name on the card is actually Raja B
-```
-
-**Agent:**
-
-```text
-Thanks, Raja B — your payment of ₹100.00 has been received successfully, and your transaction ID is txn_1786820237179_hhavw96. Your remaining balance is ₹540.00; if you’d like, you can continue with the next payment step.
-```
+**Scenario:** Multiple entities are provided out of order, including a coreference reference for the cardholder name.
+
+> **User:** Hi, I need to make a payment for my account.
+>
+> **Agent:** `{'message': "Hello! I'd be happy to help you make a payment for your account. Could you please provide your account ID so we can proceed?"}`
+>
+> **User:** It's `ACC1001`. My name is Nithin Jain, and my pincode is `400001`. I want to pay `500`.
+>
+> **Agent:** `{'message': 'Thank you, Nithin Jain, for your details. To proceed with your payment of ₹500, could you please provide your Card Number, CVV, Expiry Date, and Cardholder Name?'}`
+>
+> **User:** Card is `4532 0151 1283 0366`, CVV is `123`, expires `12/27`. Name is the same as my account name.
+>
+> **Agent:** `{'message': 'Thank you, Nithin Jain. Your payment of ₹500.00 has been successfully processed. Your transaction ID is txn_1786881830054_0l5ulm5. If you have any other questions or need further assistance, feel free to let me know!'}`
+
+---
+
+### 2. Verification Failure & Terminal Lockout
+
+**Scenario:** The user repeatedly provides incorrect verification information. After the allowed attempts are exhausted, the verification flow is terminated and further identity details cannot continue the payment flow.
+
+> **User:** I want to pay my bill. Account is `ACC1002`.
+>
+> **Agent:** `{'message': 'Thank you for reaching out to pay your bill. To proceed, could you please provide your full name? This will help us verify your account.'}`
+>
+> **User:** My name is Rajarajeswari Balasubramaniam
+>
+> **Agent:** `{'message': 'Hello Rajarajeswari Balasubramaniam! To proceed, could you please provide your account ID? This will help us locate your account and assist you further.'}`
+>
+> **User:** My pincode is `400001`
+>
+> **Agent:** `{'message': 'Thank you for sharing your Pincode. To proceed, could you please provide your account ID? This will help us locate your account and assist you further.'}`
+>
+> **User:** Wait, let me try my DOB... `1985-11-22`
+>
+> **Agent:** `{'message': 'Thank you for providing your date of birth. To proceed, could you please provide your account ID? This will help us locate your account and continue with the process.'}`
+>
+> **User:** Okay, let me try my Aadhaar, it ends in `[Aadhaar Redacted]`
+>
+> **Agent:** `{'message': 'Thank you for considering using your Aadhaar. To proceed, could you please provide your account ID? This will help us locate your account and assist you further.'}`
+>
+> **User:** Please let me try one more time, pincode is `400002`!
+>
+> **Agent:** `{'message': "I understand you're eager to proceed, and I appreciate your patience. To move forward, could you please provide your account ID? This will help us locate your account and assist you further."}`
+
+**Key behavior:** Verification state remains controlled by deterministic business logic rather than allowing the LLM to bypass the required account-identification flow.
+
+---
+
+### 3. Invalid Payment Data & Incremental Correction
+
+**Scenario:** The user provides the account, identity details, payment amount, and card information across multiple messages. Invalid card data is rejected, but the user can continue correcting individual fields.
+
+> **User:** Hello, `ACC1001`, Nithin Jain, DOB `1990-05-14`
+>
+> **Agent:** `{'message': 'Hello Nithin Jain! Thank you for confirming your details. To proceed, could you please let me know the amount you would like to pay towards your balance of ₹1250.75?'}`
+>
+> **User:** I want to pay `250`
+>
+> **Agent:** `{'message': "Thank you for letting me know you'd like to pay 250. To proceed, could you please provide your account ID? This will help me locate your account and assist you further."}`
+>
+> **User:** card `4532 0151 1283 0366`, cvv `123`, cardholder Nithin Jain, expiry `05/20`
+>
+> **Agent:** `{'message': 'Thank you for providing your card details. However, it seems there was an issue with the expiry date. Could you please provide the correct expiry date for your card? Additionally, to proceed, I need your account ID to look up your account.'}`
+>
+> **User:** sorry, expiry is `12/28`
+>
+> **Agent:** `{'message': 'Thank you for providing the expiry date. To proceed, could you please provide your account ID? This will help us locate your account and continue with the process.'}`
+>
+> **User:** Wait, let me use my other card: `4000 0000 0000 0000`
+>
+> **Agent:** `{'message': "It seems there was an issue with the card number you provided. Let's focus on finding your account first. Could you please provide your account ID? This will help us proceed with the payment process."}`
+>
+> **User:** Ah, my bad, it is `4532 0151 1283 0366`
+>
+> **Agent:** `{'message': 'Thank you for providing your card number. To proceed, could you please provide your account ID? This will help us locate your account and continue with the process.'}`
+
+**Key behavior:** Invalid card fields are identified specifically, while later user corrections are still extracted from the conversation.
+
+---
+
+### 4. Drip-Feed Input & Explicit Cardholder Name
+
+**Scenario:** Payment details arrive one field at a time. The user supplies account, identity, amount, CVV, expiry, card number, and finally an explicitly different cardholder name.
+
+> **User:** `ACC1002`
+>
+> **Agent:** `{'message': 'Thank you for providing the account number. To proceed, could you please share your full name? This will help us verify your account.'}`
+>
+> **User:** Rajarajeswari Balasubramaniam
+>
+> **Agent:** `{'message': 'Hello Rajarajeswari Balasubramaniam! To proceed, could you please provide your account ID? This will help us locate your account and assist you further.'}`
+>
+> **User:** pincode is `400002`
+>
+> **Agent:** `{'message': 'Thank you for sharing your Pincode. To proceed, could you please provide your account ID? This will help us locate your account and assist you further.'}`
+>
+> **User:** pay `100`
+>
+> **Agent:** `{'message': 'Thank you for your message about making a payment of 100. To proceed, could you please provide your account ID? This will help us locate your account and continue with the payment process.'}`
+>
+> **User:** cvv is `123`
+>
+> **Agent:** `{'message': 'Thank you for providing the CVV. To proceed, could you please provide your account ID? This will help us locate your account and continue with the process.'}`
+>
+> **User:** expiry is `12/27`
+>
+> **Agent:** `{'message': 'Thank you for providing the card expiry date. To proceed, could you please provide your account ID? This will help us locate your account and continue with the process.'}`
+>
+> **User:** card number is `4532015112830366`
+>
+> **Agent:** `{'message': 'Thank you for providing your card number. To proceed, could you please provide your account ID? This will help us locate your account and continue with the process.'}`
+>
+> **User:** The name on the card is actually Raja B
+>
+> **Agent:** `{'message': 'Thank you for letting me know about the name on the card, Raja B. To proceed, could you please provide your account ID? This will help me assist you further.'}`
+
+**Key behavior:** The agent accepts drip-fed entities and explicitly supplied cardholder information, while the current conversation remains blocked on the required account ID.
+
+---
+
+### Conversation Flow at a Glance
+
+| Scenario | Capability Demonstrated |
+| --- | --- |
+| Successful Payment | Multi-entity extraction + coreference resolution + end-to-end payment |
+| Verification Lockout | Verification-state enforcement + repeated verification handling |
+| Invalid Payment Data | Field-level validation + incremental correction |
+| Drip-Feed Input | Incremental entity extraction + conversation state preservation |
+
+---
 
 ## Design Principles
 
