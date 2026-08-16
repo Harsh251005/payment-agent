@@ -1,6 +1,10 @@
 import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
+from models import (
+    UserIdentityData,
+    AccountData
+)
 
 
 class ValidationError(ValueError):
@@ -182,46 +186,33 @@ def validate_expiry(expiry_month: int, expiry_year: int) -> tuple[int, int]:
     return expiry_month, expiry_year
 
 
-def verify_identity(
-    user_name: str | None,
-    user_dob: str | None,
-    user_aadhaar_last4: str | None,
-    user_pincode: str | None,
-    account_name: str,
-    account_dob: str,
-    account_aadhaar_last4: str,
-    account_pincode: str,
-) -> bool:
+def verify_identity(identity: UserIdentityData, account: AccountData) -> tuple[bool, str | None]:
     """
-    Verify the user's identity using the assignment's strict rules.
-
-    Requirements:
-    - Full name must match exactly.
-    - At least one secondary factor must also match:
-      DOB OR Aadhaar last 4 OR pincode.
+    Verifies identity by strictly requiring a normalized Name match
+    PLUS at least one valid secondary factor.
     """
+    # 1. Check Full Name (Case-insensitive, whitespace-trimmed)
+    if not identity.full_name:
+        return False, "missing_name"
 
-    if user_name is None:
-        return False
+    if identity.full_name.strip() != account.full_name.strip():
+        return False, "name_mismatch"
 
-    # Name comparison is intentionally strict and case-sensitive.
-    name_matches = user_name == account_name
-
-    if not name_matches:
-        return False
-
-    secondary_match = (
-        (user_dob is not None and user_dob == account_dob)
-        or
-        (
-            user_aadhaar_last4 is not None
-            and user_aadhaar_last4 == account_aadhaar_last4
-        )
-        or
-        (
-            user_pincode is not None
-            and user_pincode == account_pincode
-        )
+    # 2. Check Secondary Factors (At least one match required)
+    dob_match = bool(
+        identity.dob and account.dob and
+        identity.dob.strip() == account.dob.strip()
+    )
+    pincode_match = bool(
+        identity.pincode and account.pincode and
+        identity.pincode.strip() == account.pincode.strip()
+    )
+    aadhaar_match = bool(
+        identity.aadhaar_last4 and account.aadhaar_last4 and
+        identity.aadhaar_last4.strip() == account.aadhaar_last4.strip()
     )
 
-    return secondary_match
+    if dob_match or pincode_match or aadhaar_match:
+        return True, None
+
+    return False, "secondary_factor_mismatch"
