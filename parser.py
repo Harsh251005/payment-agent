@@ -49,9 +49,10 @@ class ExtractionResult(BaseModel):
     cardholder_name: Optional[str] = Field(
         default=None,
         description=(
-            "The name printed on the credit card. ONLY extract a name here if the user "
-            "explicitly specifies it is for the card (e.g., 'the name on the card is Nithin'). "
-            "Otherwise, put names in 'full_name'."
+            "The name on the credit card. "
+            "CRITICAL COREFERENCE RULE: If the user says 'same as my account', 'same name', or refers to a previous name, "
+            "you MUST look at the CURRENT CONVERSATION STATE JSON in the prompt and extract the actual string value of their 'full_name' here. "
+            "NEVER extract literal reference phrases like 'same as my account name'."
         )
     )
 

@@ -71,6 +71,15 @@ class Agent:
         user_input = user_input.strip()
         self._last_user_input = user_input
 
+        was_complete = self.state.stage == AgentStage.COMPLETE
+
+        if was_complete:
+            self.reset_session()
+            self.state.stage = AgentStage.ACCOUNT_LOOKUP
+            return {
+                "message": self._build_response("restarted_after_complete")
+            }
+
         if not user_input:
             return {
                 "message": "I didn't receive any information. Please tell me your account ID."
@@ -78,7 +87,8 @@ class Agent:
 
         self.state.last_error = None
         self._turn_errors.clear()
-        self._turn_flags.clear()
+        if not was_complete:
+            self._turn_flags.clear()
 
         # 1. LLM Extraction (Structured Outputs) happens here via your parser
         safe_state_dict = self._get_safe_state()
@@ -116,7 +126,7 @@ class Agent:
     # ------------------------------------------------------------------
 
     def _merge_extraction(self, extraction) -> None:
-        if extraction.account_id:
+        if extraction.account_id is not None:
             if self.state.account is None:
                 try:
                     self.state.account_id = normalize_account_id(extraction.account_id)
@@ -124,42 +134,42 @@ class Agent:
                     self.state.last_error = "invalid_account_id"
                     self._turn_errors.add("invalid_account_id")
 
-        if extraction.full_name:
+        if extraction.full_name is not None:
             try:
                 self.state.identity.full_name = validate_full_name(extraction.full_name)
             except ValidationError:
                 self.state.last_error = "invalid_name"
                 self._turn_errors.add("invalid_name")
 
-        if extraction.dob:
+        if extraction.dob is not None:
             try:
                 self.state.identity.dob = validate_dob(extraction.dob)
             except ValidationError:
                 self.state.last_error = "invalid_dob"
                 self._turn_errors.add("invalid_dob")
 
-        if extraction.aadhaar_last4:
+        if extraction.aadhaar_last4 is not None:
             try:
                 self.state.identity.aadhaar_last4 = validate_aadhaar_last4(extraction.aadhaar_last4)
             except ValidationError:
                 self.state.last_error = "invalid_aadhaar"
                 self._turn_errors.add("invalid_aadhaar")
 
-        if extraction.pincode:
+        if extraction.pincode is not None:
             try:
                 self.state.identity.pincode = validate_pincode(extraction.pincode)
             except ValidationError:
                 self.state.last_error = "invalid_pincode"
                 self._turn_errors.add("invalid_pincode")
 
-        if extraction.amount:
+        if extraction.amount is not None:
             try:
                 self.state.payment.amount = validate_amount(extraction.amount)
             except ValidationError:
                 self.state.last_error = "invalid_amount"
                 self._turn_errors.add("invalid_amount")
 
-        if extraction.cardholder_name:
+        if extraction.cardholder_name is not None:
             try:
                 card = self.state.payment.card or CardData()
                 card.cardholder_name = validate_full_name(extraction.cardholder_name)
@@ -168,7 +178,7 @@ class Agent:
                 self.state.last_error = "invalid_cardholder_name"
                 self._turn_errors.add("invalid_cardholder_name")
 
-        if extraction.card_number:
+        if extraction.card_number is not None:
             try:
                 card = self.state.payment.card or CardData()
                 card.card_number = validate_card_number(extraction.card_number)
@@ -177,7 +187,7 @@ class Agent:
                 self.state.last_error = "invalid_card_number"
                 self._turn_errors.add("invalid_card_number")
 
-        if extraction.cvv:
+        if extraction.cvv is not None:
             try:
                 card = self.state.payment.card or CardData()
                 card.cvv = validate_cvv(extraction.cvv)
@@ -445,7 +455,8 @@ class Agent:
             "missing_card_fields": "Look at the 'missing_card_fields' in the JSON state and explicitly list exactly WHICH card fields they still need to provide.",
             "need_card_details": "Explicitly ask the user for their Card Number, CVV, Expiry Date, and Cardholder Name.",
             "invalid_identity_input": "Look at the Validation Errors and explicitly state which identity input was incorrect, then ask them to try again.",
-            "payment_insufficient_balance": f"Inform the user their amount exceeds the balance and ask for a smaller amount. Current balance: {self.state.account.balance if self.state.account else "Unknown"}"
+            "payment_insufficient_balance": f"Inform the user their amount exceeds the balance and ask for a smaller amount. Current balance: {self.state.account.balance if self.state.account else "Unknown"}",
+            "restarted_after_complete": "Politely inform the user that their previous transaction has already been completed. Transition smoothly by asking them to provide their account ID if they would like to start a new payment.",
         }
         hint = reason_hints.get(reason, "Communicate the system action clearly and gently guide the user to the next step.")
 
@@ -521,7 +532,8 @@ class Agent:
             "payment_service_failure": "We couldn't process your payment due to a service issue. Please try again later.",
             "payment_failed": "Your payment could not be completed. Please try again later.",
             "payment_success": f"Payment successful! Thank you. Transaction ID: {self.state.transaction_id}",
-            "already_complete": "This transaction is already complete. Thank you!",
+            "already_complete": f"This payment is already complete (Transaction ID: {self.state.transaction_id}). Your account is up to date! Let me know if you need help with anything else.",
+            "restarted_after_complete": "Your previous payment was already completed. To start a new payment, please provide your account ID.",
             "terminated": "This session has ended. Please start a new conversation to make a payment.",
             "unknown_state": "Something unexpected happened. Please start a new conversation.",
         }
@@ -556,6 +568,7 @@ class Agent:
         """
         safe_state: dict[str, Any] = {
             "current_stage": self.state.stage.name,
+            "account_id": self.state.account_id,
             "verification_reattempts": self.state.verification_reattempts,
             "is_verified": self.state.verified,
             "last_error": self.state.last_error,
@@ -600,3 +613,9 @@ class Agent:
                 safe_state["payment"]["missing_card_fields"].append("cardholder_name")
 
         return safe_state
+
+    def reset_session(self):
+        """Resets the agent state for a brand new transaction."""
+        self.state = ConversationState()
+        self._turn_errors.clear()
+        self._turn_flags.clear()
